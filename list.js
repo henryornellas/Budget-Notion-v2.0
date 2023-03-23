@@ -4,6 +4,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const _ = require('lodash');
 
 const app = express();
 
@@ -12,15 +13,20 @@ const app = express();
 app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.static('public'));
-mongoose.connect('mongodb://127.0.0.1:27017/notionDB', {useNewUrlParser: true});
+mongoose.connect('mongodb+srv://Admin-henry:test123@cluster0.wxhlcjm.mongodb.net/notionDB', {useNewUrlParser: true});
 
 
-//Set new schema for DB
+//Set itemsSchema and listSchema
 const itemsSchema = {
   name: String
 };
-
 const Item = mongoose.model('item', itemsSchema);
+
+const listSchema = {
+  name: String,
+  items: [itemsSchema]
+}
+const List = mongoose.model('List', listSchema);
 
 
 //Default starter items
@@ -41,7 +47,6 @@ app.get('/', function(req, res){
 
     if(foundItems.length === 0){
       Item.insertMany(defaultItems).then(function(){
-        console.log('Successfully saved');
       }).catch(function(err){
         console.log(err);
       });
@@ -54,39 +59,82 @@ app.get('/', function(req, res){
 });
 
 
-//Submit button action adds new item to collection
-app.post('/', function(req, res){
+//Submit button adds new item to default list, or custom one
+app.post('/', async function(req, res){
 
-  const taskName = req.body.newTask
+  const taskName = req.body.newTask;
+  const listName = req.body.list;
 
   const item = new Item ({
     name: taskName
   });
-  item.save();
 
-  res.redirect('/');
-});
-
-
-
-app.post('/delete', async function(req, res){
-
-  const checkedItem = req.body.checked;
-
-  try {
-    const deleted = await Item.findByIdAndRemove(checkedItem);
-    console.log('DELETADO!');
+  if(listName === 'Today'){
+    item.save();
     res.redirect('/');
-  }catch(err){
-    console.log(err);
+  }else {
+    try{
+      const foundList = await List.findOne({name: listName});
+      foundList.items.push(item);
+      foundList.save();
+      res.redirect('/'+ listName);
+    }catch(err){
+      console.log(err);
+    }
   }
 
 });
 
 
-//Render different list name when client requests /work.
-app.get('/work', function(req, res){
-  res.render('list', {listTitle: 'Work List', newListItems: workItems});
+//Checkbox triggers /delete route, that removes the item with corresponding ID.
+app.post('/delete', async function(req, res){
+
+  const checkedItem = req.body.checked;
+  const listName = req.body.listName;
+
+  if(listName === 'Today'){
+    try {
+      const deleted = await Item.findByIdAndRemove(checkedItem);
+      console.log('DELETED!');
+      res.redirect('/');
+    }catch(err){
+      console.log(err);
+    }
+  }else{
+    try {
+      const deleted = await List.findOneAndUpdate({name: listName}, {$pull: {items: {_id: checkedItem}}});
+      res.redirect('/'+listName);
+    }catch(err){
+      console.log(err);
+    }
+  }
+
+
+});
+
+
+//Render different list name when client requests custom path.
+app.get('/:customListName', async function(req, res){
+  const customListName = _.capitalize(req.params.customListName);
+
+  try {
+    const foundList = await List.findOne({name: customListName});
+    if(foundList === null){
+      //Create a new list
+      const list = new List({
+        name: customListName,
+        items: defaultItems
+      });
+      list.save();
+      res.redirect('/' + customListName);
+    }else{
+      //Show existing list
+      res.render('list', {listTitle: foundList.name, newListItems: foundList.items});
+    }
+  }catch(err){
+    console.log(err);
+  }
+
 });
 
 
